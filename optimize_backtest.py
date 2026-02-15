@@ -3,6 +3,7 @@
 import argparse
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable
+import time
 
 import pandas as pd
 import importlib.util
@@ -15,18 +16,26 @@ def load_main_module():
     return module
 
 
-def fetch_data(mod) -> Dict[str, pd.DataFrame]:
+def fetch_data(mod, retries: int = 3, sleep_seconds: float = 1.0) -> Dict[str, pd.DataFrame]:
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=mod.LOOKBACK_DAYS)
     start_ms, end_ms = mod.ms(start), mod.ms(end)
 
     dfs = {}
     for sym in mod.SYMBOLS:
-        try:
-            dfs[sym] = mod.fetch_klines(sym, start_ms, end_ms, mod.INTERVAL)
-            print(f"Fetched {sym}: {len(dfs[sym])}")
-        except Exception as exc:
-            print(f"Skip {sym}: {exc}")
+        last_exc = None
+        for attempt in range(1, retries + 1):
+            try:
+                dfs[sym] = mod.fetch_klines(sym, start_ms, end_ms, mod.INTERVAL)
+                print(f"Fetched {sym}: {len(dfs[sym])}")
+                break
+            except Exception as exc:
+                last_exc = exc
+                print(f"Retry {attempt}/{retries} for {sym}: {exc}")
+                if attempt < retries:
+                    time.sleep(sleep_seconds * attempt)
+        if sym not in dfs and last_exc is not None:
+            print(f"Skip {sym} after {retries} retries: {last_exc}")
     if "BTCUSDT" not in dfs:
         raise RuntimeError("BTCUSDT not fetched; cannot run RS benchmark")
     return dfs
@@ -103,13 +112,15 @@ def main():
     parser.add_argument("--top-k", type=int, default=10, help="print top-k results")
     parser.add_argument("--max-cases", type=int, default=None, help="optional limit on cases for quick checks")
     parser.add_argument("--lookback-days", type=int, default=None, help="override LOOKBACK_DAYS")
+    parser.add_argument("--fetch-retries", type=int, default=3, help="fetch retry count per symbol")
+    parser.add_argument("--fetch-sleep", type=float, default=1.0, help="base seconds between retries")
     args = parser.parse_args()
 
     mod = load_main_module()
     if args.lookback_days is not None:
         mod.LOOKBACK_DAYS = args.lookback_days
 
-    dfs = fetch_data(mod)
+    dfs = fetch_data(mod, retries=args.fetch_retries, sleep_seconds=args.fetch_sleep)
     best = None
     results = []
     i = 0
