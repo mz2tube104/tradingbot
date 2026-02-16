@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 # ----------------------------
 BASE_URL = "https://data-api.binance.vision"  # market-data-only base (public)
 KLINES_EP = "/api/v3/klines"                  # spot klines endpoint
-INTERVAL = "15m"
+INTERVAL = "5m"
 LOOKBACK_DAYS = 90
 
 # CMC Top10 (today, based on CoinMarketCap "Top 100 Crypto Coins" page)
