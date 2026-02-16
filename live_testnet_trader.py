@@ -426,7 +426,13 @@ def run_live_trading(
                     equity -= alloc
 
             equity_curve.append((t, equity, len(positions)))
-            print(f"[{t}] equity={equity:.2f}, open_pos={len(positions)}, trades={len(trades)}")
+            pnl_abs = equity - initial_capital_usdt
+            pnl_pct = (pnl_abs / initial_capital_usdt * 100) if initial_capital_usdt > 0 else 0.0
+            print(
+                f"[{t}] equity={equity:.2f} "
+                f"(pnl={pnl_abs:+.2f}, return={pnl_pct:+.2f}%), "
+                f"open_pos={len(positions)}, trades={len(trades)}"
+            )
 
             now_mon = time.time()
             if now_mon - last_monitor >= monitor_interval_seconds:
