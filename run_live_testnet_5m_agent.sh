@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eu
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${ROOT_DIR}/logs"
@@ -26,13 +26,16 @@ echo "Stop: kill $(cat "${PID_FILE}")"
 while true; do
   {
     echo "[$(date -u '+%F %T')] start live_testnet_dry_run_5m"
-    python3 -u "${ROOT_DIR}/live_testnet_trader.py" \
+    if python3 -u "${ROOT_DIR}/live_testnet_trader.py" \
       --dry-run \
       --poll-seconds 60 \
       --monitor-interval 30 \
       --initial-capital-usdt 10000 \
-      --out-dir "${ROOT_DIR}"
-    RC=$?
+      --out-dir "${ROOT_DIR}"; then
+      RC=0
+    else
+      RC=$?
+    fi
     echo "[$(date -u '+%F %T')] exited rc=${RC}, restarting in 10s"
     sleep 10
   } | tee -a "${LOG_FILE}"
