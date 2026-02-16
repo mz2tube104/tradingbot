@@ -13,8 +13,18 @@ if [[ -f "${PID_FILE}" ]] && kill -0 "$(cat "${PID_FILE}")" 2>/dev/null; then
   exit 0
 fi
 
-{
-  while true; do
+cleanup() {
+  rm -f "${PID_FILE}"
+}
+trap cleanup EXIT
+
+echo $$ > "${PID_FILE}"
+echo "5m dry-run agent started (PID: $$)"
+echo "Log: ${LOG_FILE}"
+echo "Stop: kill $(cat "${PID_FILE}")"
+
+while true; do
+  {
     echo "[$(date -u '+%F %T')] start live_testnet_dry_run_5m"
     python3 -u "${ROOT_DIR}/live_testnet_trader.py" \
       --dry-run \
@@ -25,9 +35,5 @@ fi
     RC=$?
     echo "[$(date -u '+%F %T')] exited rc=${RC}, restarting in 10s"
     sleep 10
-  done
-} | tee -a "${LOG_FILE}" &
-
-echo $! > "${PID_FILE}"
-echo "Started 5m dry-run agent: PID $!"
-echo "Log: ${LOG_FILE}"
+  } | tee -a "${LOG_FILE}"
+done
