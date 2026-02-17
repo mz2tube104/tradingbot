@@ -78,23 +78,30 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
     symbol_cooldown_until = {}
     skip_symbols = {"USDCUSDT"} if getattr(mod, "REMOVE_STABLECOIN", True) else set()
 
-    for bar_i, t in enumerate(common):
+    timestamps = list(sorted(common))
+    if len(timestamps) < 2:
+        raise RuntimeError("No complete bars for delayed execution paper backtest.")
+
+    for bar_i in range(1, len(timestamps)):
+        signal_t = timestamps[bar_i - 1]
+        exec_t = timestamps[bar_i]
+
         updated_positions = []
         for pos in positions:
             sym = pos["sym"]
             df = dfs[sym]
-            if t not in df.index:
-                updated_positions.append(pos)
-                continue
+            if signal_t not in df.index or exec_t not in df.index:
+                raise RuntimeError("Internal indexing error while simulating delayed execution.")
 
-            row = df.loc[t]
-            price = float(row["close"])
+            signal_row = df.loc[signal_t]
+            exec_row = df.loc[exec_t]
+            price = float(signal_row["close"])
             hold_bars = bar_i - pos["entry_idx"]
-            atrv = row["atr"]
+            atrv = signal_row["atr"]
 
             if pd.isna(atrv):
                 if hold_bars >= mod.MAX_HOLD_BARS:
-                    exit_px = _apply_slippage(price, "sell", slippage_bps)
+                    exit_px = _apply_slippage(float(exec_row["open"]), "sell", slippage_bps)
                     gross = pos["qty"] * (exit_px - pos["entry_px"])
                     fee = exit_fee * (pos["qty"] * pos["entry_px"]) + exit_fee * (pos["qty"] * exit_px)
                     net = gross - fee
@@ -102,7 +109,7 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
                     trades.append({
                         "sym": sym,
                         "entry_t": pos["entry_t"],
-                        "exit_t": t,
+                        "exit_t": exec_t,
                         "entry_px": pos["entry_px"],
                         "exit_px": exit_px,
                         "qty": pos["qty"],
@@ -119,8 +126,8 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
                 updated_positions.append(pos)
                 continue
 
-            atrv = float(atrv)
-            pos["peak_px"] = max(pos["peak_px"], price)
+                atrv = float(atrv)
+                pos["peak_px"] = max(pos["peak_px"], price)
 
             stop = pos["entry_px"] - mod.STOP_ATR * atrv
             trail = pos["peak_px"] - mod.TRAIL_ATR * atrv
@@ -134,7 +141,7 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
             )
 
             if exit_cond:
-                exit_px = _apply_slippage(price, "sell", slippage_bps)
+                exit_px = _apply_slippage(float(exec_row["open"]), "sell", slippage_bps)
                 gross = pos["qty"] * (exit_px - pos["entry_px"])
                 fee = exit_fee * (pos["qty"] * pos["entry_px"]) + exit_fee * (pos["qty"] * exit_px)
                 net = gross - fee
@@ -142,7 +149,7 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
                 trades.append({
                     "sym": sym,
                     "entry_t": pos["entry_t"],
-                    "exit_t": t,
+                    "exit_t": exec_t,
                     "entry_px": pos["entry_px"],
                     "exit_px": exit_px,
                     "qty": pos["qty"],
@@ -168,11 +175,11 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
                 if symbol_cooldown_until.get(sym, -1) >= bar_i:
                     continue
 
-                row = df.loc[t]
+                row = df.loc[signal_t]
                 if (
                     pd.isna(row["ret24h"]) or pd.isna(row["atr"]) or pd.isna(row["hh"]) or
                     pd.isna(row["vol_ratio"]) or pd.isna(row["mom4"]) or pd.isna(row["mom16"]) or
-                    pd.isna(btc_ret.loc[t])
+                    pd.isna(btc_ret.loc[signal_t])
                 ):
                     continue
 
@@ -183,7 +190,7 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
                 if row["mom4"] <= 0:
                     continue
 
-                rs = float(row["ret24h"] - btc_ret.loc[t])
+                rs = float(row["ret24h"] - btc_ret.loc[signal_t])
                 if rs <= 0:
                     continue
 
@@ -200,7 +207,7 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
                 )
 
                 if score > mod.TOP_SCORE_MIN:
-                    candidates.append((score, sym, rs, float(row["open"])))
+                    candidates.append((score, sym, rs, float(dfs[sym].loc[exec_t, "open"])))
 
             if candidates:
                 candidates.sort(key=lambda x: x[0], reverse=True)
@@ -226,7 +233,7 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
                     positions.append({
                         "sym": pick_sym,
                         "entry_px": entry_px,
-                        "entry_t": t,
+                        "entry_t": exec_t,
                         "entry_idx": bar_i,
                         "peak_px": entry_px,
                         "qty": qty,
@@ -235,7 +242,7 @@ def run_paper_backtest(mod, dfs: Dict[str, pd.DataFrame], slippage_bps: float = 
                         "entry_fee": fee,
                     })
 
-        equity_curve.append((t, equity))
+        equity_curve.append((exec_t, equity))
 
     ec = pd.DataFrame(equity_curve, columns=["t", "equity"]).set_index("t")
     if len(ec) == 0:
